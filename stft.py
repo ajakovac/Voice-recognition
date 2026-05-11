@@ -178,6 +178,17 @@ class STFT:
             peaks.append(find_maxima(spectrum_data, nmax=nmax, threshold=threshold))
         return peaks
 
+def transform_to_logscale(spectrogram, nu0=50, Nmodes_per_octave=24, Noctaves=8):
+    Nalphas = Nmodes_per_octave*Noctaves
+    frequencies = np.array([ nu0*2**(alpha/Nmodes_per_octave) for alpha in range(Nalphas)])
+    amplitude_transofrmation_matrix = np.zeros((Nalphas, spectrogram.fourier_data.shape[1]))
+    for i, f in enumerate(frequencies):
+        idx = np.argmin(np.abs(f-spectrogram.frequencies))
+        amplitude_transofrmation_matrix[i, idx] = 1
+    log_spectrogram = amplitude_transofrmation_matrix @ spectrogram.fourier_data.T
+    return log_spectrogram.T, frequencies
+
+
 class Synthesizer:
     def __init__(self, stft_argument:StftArgument=StftArgument()):
         self.sample_rate     = stft_argument.sample_rate
@@ -199,7 +210,6 @@ class Synthesizer:
         self.data = np.array([])
         tail = None
         for chord_data in chord_list:
-            print(f"Synthesizing chord: {chord_data}")
             new_element = np.zeros_like(self.trange, dtype=complex)
             for amplitude, frequency in chord_data:
                 sine_wave = amplitude*np.exp(2j*np.pi*frequency*self.trange)*self.W_vector
@@ -207,7 +217,6 @@ class Synthesizer:
                     head = sine_wave[:self.N_step]
                     phase_diff = np.angle(np.sum(tail*np.conj(head)))
                     sine_wave *= np.exp(1j*phase_diff)
-                print(new_element.shape, sine_wave.shape)
                 new_element += sine_wave
             if tail is not None:
                 self.data = np.concatenate( ( self.data, np.zeros(self.N_step, dtype=complex) ))
