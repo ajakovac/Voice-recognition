@@ -30,6 +30,19 @@ $$
 $$
 with any $p$.
 
+## Sound wave analysis
+
+Steps of the analysis:
+- We have a time discretization $t_n = n\,dt$, where $dt=1/$sampling rate.
+- define a window function $W(t):[0,2]\to[0,1]$, with $W(0)=W(2)=0$, $W(1)=1$ and $W(t)+W(t+1)=1$ in the interval $[1,2]$
+- discretize the window function on scale $T$, i.e. $W_n = W(n dt/T)$, $n= \{0,\dots 2N_T-1\}$ where $N_T=T/dt$
+- establish a basis $$
+    g_{n\alpha} = W_n e^{-2ni\pi k_\alpha}, \quad k_\alpha = 2^{\alpha/N_{octave}} \nu_0 dt$$
+- the fitting condition is the minimization of the loss $L$ where $$
+    L(c, t) = \frac12 \sum_{n=0}^{2N_T-1} \left[W_n f(t + n dt) - \sum_\alpha c_\alpha g_{n\alpha}\right]^2 + L_{reg}(c) = \text{minimum.} $$ In matrix notation $$
+    L(c,t) = \frac12 (v- gc)^T(v- gc) + L_{reg}(c), $$ which implies for the minimum $$ g^T g c + \partial_c L_{reg} = g^Tv$$
+- with $L_2$ regularization $L_{reg}=\lambda c^Tc$ and so $$c = (g^Tg+\lambda)^{-1} g^Tv.$$ We introduce $$M_{PCA} =(g^Tg+\lambda)^{-1} g^T,$$ then the coefficients come from a simple product $$c = M_{PCA} v.$$ 
+
 ## Fourier transform
 
 To get the Fourier transform of the original function, we can first make the wavelet transform, and do an additional discrete Fourier transformation. To see this we remark that the sum rule ensures that

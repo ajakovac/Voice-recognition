@@ -53,45 +53,15 @@ def data_view(data, view):
         print(f'Error in view function: {e}')
         return None
 
-class SoundData:
-    def __init__(self, sample_rate=44100):
-        self.sample_rate = sample_rate
-        self.sampling_dt = 1/sample_rate
-    
-    def set(self, data):
-        self.data = data
-        self.duration = len(data)/self.sample_rate  # maximal time of the signal
-        return self
-
-    def time_to_index(self, ti):
-        if ti is None:
-            return int(self.duration*self.sample_rate)
-        elif ti>self.duration:
-            print(f'time {ti} is out of range: it must be in [0,{self.duration}]')
-            return int(self.duration*self.sample_rate)
-        elif ti< 0:
-            print(f'time {ti} is out of range: it must be in [0,{self.duration}]')
-            return 0
-        else:
-            return int(ti*self.sample_rate)
-
-    def slice(self, t1,t2):
-        n1 = self.time_to_index(t1)
-        n2 = self.time_to_index(t2)
-        return self.data[n1:n2]
-
-    def play(self, t1=0, t2=None):
-        channel_0_int16 = np.int16(self.slice(t1,t2) / np.max(np.abs(self.slice(t1,t2))) * 32767)
-        sd.play(channel_0_int16, samplerate=self.sample_rate)
-        sd.wait()
-
-    def plot(self, ax = None, t1=0, t2=None, **kwargs):
-        if ax is None:
-            fig, ax = plt.subplots()
-        data = self.slice(t1, t2)
-        subt = np.arange(len(data))/self.sample_rate
-        ax.plot(subt, data, **kwargs)
-        return fig, ax
+def play_sound(data, t1=0, t2=None, sample_rate=44100):
+    if t2 is None:
+        t2 = len(data)/sample_rate
+    n1 = max(int(t1*sample_rate), 0)
+    n2 = min(int(t2*sample_rate), len(data))
+    data = data[n1:n2]
+    channel_0_int16 = np.int16(data / np.max(np.abs(data)) * 32767)
+    sd.play(channel_0_int16, samplerate=sample_rate)
+    sd.wait()
 
 class STFT:
     def __init__(self, stft_argument):
@@ -110,9 +80,6 @@ class STFT:
         self.frequencies = np.fft.fftfreq(2*self.N_T, d=self.dt)[:self.N_T]
         self.clean()
 
-    def range(self, t0, t1):
-        return np.arange(t0,t1+self.dt, self.dt)
-
     def clean(self):
         self.amplitude = None
         self.fourier_data = None
@@ -129,22 +96,25 @@ class STFT:
         return self
 
     def transform(self):
-        self.fourier_data = []
         if self.amplitude is None:
             print('data is not set')
             return self
+        self.fourier_data = []
+        self.window_times = []
         for ncenter in range(self.N_T, len(self.amplitude)-self.N_T, self.N_step):
             fourier_trf = self.dt*np.fft.fft(self.W_vector*self.amplitude[ncenter-self.N_T:ncenter+self.N_T])[:self.N_T]
-            self.fourier_data.append([ncenter/self.sample_rate, fourier_trf])
+            self.fourier_data.append(fourier_trf)
+            self.window_times.append(ncenter/self.sample_rate)
+        self.fourier_data = np.array(self.fourier_data)
+        self.window_times = np.array(self.window_times)
         return self
     
     def invert(self):
-        self.amplitude = []
         if self.fourier_data is None:
             print('fourier data is not set')
             return self
         self.amplitude=np.array([])
-        for _,data_part in self.data:
+        for data_part in self.fourier_data:
             ftrec = np.concatenate( (data_part, [0], np.conj(data_part[1:][::-1]) ), axis=0)
             new_rec =  np.real(np.fft.ifft(ftrec)/self.dt)
             if len(self.amplitude)==0:
@@ -156,22 +126,43 @@ class STFT:
         self.amplitude/=self.divide_step
         return self
 
-    def plot_spectrum(self, t, line='-', ax = None, view='power', **kwargs):
-        n_time = int((t-self.times[0])/self.t_step)
-        data = data_view(self.fourier_data[n_time], view)
+    def slice(self, t1,t2):
+        n1 = max(int(t1*self.sample_rate), 0)
+        if t2 is None:
+            t2 = len(self.amplitude)/self.sample_rate
+        n2 = min(int(t2*self.sample_rate), len(self.amplitude))
+        return self.amplitude[n1:n2]
+
+    def plot_amplitude(self, t1=0, t2=None, ax = None, **kwargs):
         if ax is None:
             fig, ax = plt.subplots()
+        else:
+            fig = ax.figure
+        data = self.slice(t1, t2)
+        subt = np.arange(len(data))/self.sample_rate
+        ax.plot(subt, data, **kwargs)
+        return fig, ax
+
+    def plot_spectrum(self, t, line='-', ax = None, view='power', **kwargs):
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = ax.figure
+        n_time = int((t-self.window_times[0])/self.t_step)
+        data = data_view(self.fourier_data[n_time], view)
         ax.plot(self.frequencies, data, line, **kwargs)
         ax.set_xscale('log')
         return fig, ax
 
-    def plot(self, ax = None, view='spectrum', **kwargs):
+    def plot_spectrogram(self, ax = None, view='spectrum', **kwargs):
         if ax is None:
             fig, ax = plt.subplots()
+        else:
+            fig = ax.figure
         alldata = data_view(self.fourier_data, view)[:,1:]
         colors = ["white", "blue"]  # White for negative, black for positive
         cmap = mcolors.LinearSegmentedColormap.from_list("custom_cmap", colors)
-        X, Y = np.meshgrid(self.times, self.frequencies[1:], indexing="ij")
+        X, Y = np.meshgrid(self.window_times, self.frequencies[1:], indexing="ij")
         mesh = ax.pcolormesh(X,Y, alldata, shading='gouraud', cmap=cmap, **kwargs)
         ax.set_xlabel('time (s)')
         ax.set_ylabel('frequency (Hz)')
@@ -182,14 +173,13 @@ class STFT:
         return np.sum(np.abs(self.fourier_data)**2,axis=1)
 
     def peaks(self, nmax=10, threshold=0, view='spectrum'):
-        data = data_view(self.fourier_data, view)
         peaks = []
-        for spectrum_data in data:
-            peaks.append(find_maxima(spectrum_data, nmax, threshold))
+        for spectrum_data in data_view(self.fourier_data, view):
+            peaks.append(find_maxima(spectrum_data, nmax=nmax, threshold=threshold))
         return peaks
 
-class Synthetize:
-    def __init__(self, stft_argument):
+class Synthesizer:
+    def __init__(self, stft_argument:StftArgument=StftArgument()):
         self.sample_rate     = stft_argument.sample_rate
         self.t_int           = stft_argument.t_int
         self.divide_step     = stft_argument.divide_step
@@ -199,28 +189,32 @@ class Synthetize:
         self.dt = 1/self.sample_rate
         self.N_T = int(self.t_int*self.sample_rate)
         self.N_step = int(self.t_step*self.sample_rate)
-        self.sign_vector = np.array([(-1)**n for n in range(2*self.N_T)])
         xrange = np.arange(-self.N_T, self.N_T)
         self.W_vector = np.array([ self.window_function(n/self.N_T) for n in xrange])
         self.norm = np.sum(self.W_vector**2)/len(xrange)
         self.frequencies = np.fft.fftfreq(2*self.N_T, d=self.dt)[:self.N_T]
+        self.trange = np.arange(-self.N_T, self.N_T)/self.sample_rate
 
-    def set_data(self, spectrogram):
-        self.data = spectrogram
-        return self
-
-    def synthetize_slice(self, data_part):
-        ftrec = np.concatenate( (data_part, [0], np.conj(data_part[1:][::-1]) ), axis=0)
-        return np.real(np.fft.ifft(ftrec)/self.dt)
-    
-    def synthetize(self):
-        rec_data=np.array([])
-        for data_part in self.data:
-            new_rec = self.synthetize_slice(data_part)
-            if len(rec_data)==0:
-                rec_data = new_rec
+    def synthesize(self, chord_list):
+        self.data = np.array([])
+        tail = None
+        for chord_data in chord_list:
+            print(f"Synthesizing chord: {chord_data}")
+            new_element = np.zeros_like(self.trange, dtype=complex)
+            for amplitude, frequency in chord_data:
+                sine_wave = amplitude*np.exp(2j*np.pi*frequency*self.trange)*self.W_vector
+                if tail is not None:
+                    head = sine_wave[:self.N_step]
+                    phase_diff = np.angle(np.sum(tail*np.conj(head)))
+                    sine_wave *= np.exp(1j*phase_diff)
+                print(new_element.shape, sine_wave.shape)
+                new_element += sine_wave
+            if tail is not None:
+                self.data = np.concatenate( ( self.data, np.zeros(self.N_step, dtype=complex) ))
+                add_data = np.concatenate( ( np.zeros(len(self.data) -len(new_element), dtype=complex), new_element ))
+                self.data += add_data
             else:
-                rec_data = np.concatenate( ( rec_data, np.zeros(self.N_step) ))
-                add_data = np.concatenate( ( np.zeros(len(rec_data) -len(new_rec) ), new_rec ))
-                rec_data += add_data
-        return rec_data/self.divide_step
+                self.data = new_element
+            tail = new_element[-self.N_step:]
+        self.data /= self.divide_step
+        return self.data
